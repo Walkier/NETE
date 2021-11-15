@@ -32,11 +32,12 @@ parser.add_argument('--dataset', default="cholec80")
 parser.add_argument('--sample_rate', default=2, type=int)
 parser.add_argument('--k', default=-100, type=int) # for cross validate type
 parser.add_argument('--refine_model', default='gru')
+parser.add_argument('--refine_epochs', default=40, type=int)
 args = parser.parse_args()
 
 learning_rate = 1e-4
 epochs = 100
-refine_epochs = 40
+refine_epochs = args.refine_epochs
 
 if args.dataset == 'm2cai16':
     refine_epochs = 15 # early stopping
@@ -547,8 +548,9 @@ if args.action == 'refine_train':
     
     # the sample rate for prob sequence is 1.
     video_traindataset = VideoDataset(args.dataset, '{}/train_dataset'.format(args.dataset), 1, 'cross_validate_type@2020')
-#     video_back_traindataset = VideoDataset(args.dataset, '{}/train_dataset'.format(args.dataset), 1, 'mask_hard_frame_type@2020')
-#     video_traindataset.merge(video_back_traindataset) # add more training data
+    print('adding hard frames')
+    video_back_traindataset = VideoDataset(args.dataset, '{}/train_dataset'.format(args.dataset), 1, 'mask_hard_frame_type@2020')
+    video_traindataset.merge(video_back_traindataset) # add more training data
 #     video_back_traindataset_2 = VideoDataset('cholec80', 'cholec80/train_dataset', 1, 'random_mask_type@2020')
 #     video_traindataset.merge(video_back_traindataset_2)
     video_train_dataloader = DataLoader(video_traindataset, batch_size=1, shuffle=True, drop_last=False)
@@ -560,10 +562,11 @@ if args.action == 'refine_train':
 
 if args.action == 'refine_predict':
     base_model_path = 'saved_models/{}/base_tcn/base_tcn.model'.format(args.dataset)
-    refine_model_path = 'saved_models/{}/refine_gru/refine_gru.model'.format(args.dataset)
+    # refine_model_path = 'saved_models/{}/refine_gru/refine_gru.model'.format(args.dataset)
 #     
 #     base_model_path = 'models/{}/base_tcn/{}.model'.format(args.dataset, epochs) # your model
-#     refine_model_path = 'models/{}/refine_{}/{}.model'.format(args.dataset, args.refine_model, refine_epochs) # your model
+    refine_model_path = 'models/{}/refine_{}/{}.model'.format(args.dataset, args.refine_model, refine_epochs) # your model
+    print('using refine model', refine_model_path)
 
     base_model.load_state_dict(torch.load(base_model_path))
     refine_model.load_state_dict(torch.load(refine_model_path))
