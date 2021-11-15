@@ -1,6 +1,8 @@
 from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets.folder import default_loader
 from torchvision import transforms
+from copy import deepcopy
+from collections import Counter
 import os
 import numpy as np
 
@@ -127,6 +129,7 @@ class VideoDataset(Dataset):
         self.blacklist = blacklist # for cross-validate
         self.videos = []
         self.labels = []
+        self.phase_progresses = []
         self.hard_frames = []
         self.video_names = []
         if dataset =='cholec80':
@@ -153,6 +156,7 @@ class VideoDataset(Dataset):
 
             self.videos.append(videos)
             self.labels.append(labels)
+            self.phase_progresses.append(self._gen_phase_progress(deepcopy(labels)))
             self.hard_frames.append(masks)
             self.video_names.append(v_f)
 
@@ -162,8 +166,29 @@ class VideoDataset(Dataset):
         return len(self.videos)
 
     def __getitem__(self, item):
-        video, label, mask, video_name = self.videos[item], self.labels[item], self.hard_frames[item], self.video_names[item]
-        return video, label, mask, video_name
+        video, label, mask, video_name, phase_progress = self.videos[item], self.labels[item], self.hard_frames[item], self.video_names[item], self.phase_progresses[item]
+        return video, label, mask, video_name, phase_progress
+
+    def _gen_phase_progress(self, labels):
+        counts = Counter(labels)
+        increment = {k: 1/v for k, v in counts.items()}
+        phase = labels[0] #can skip prep
+        count = 0
+
+        for i, label in enumerate(labels):
+            if label != phase:
+                phase = label #apparently phase can sometimes be non-seq??
+                count = 0
+            
+            labels[i] = count*increment[phase] #try start with 0, and end with not 1
+
+            count += 1
+            
+        # import matplotlib.pyplot as plt
+        # plt.plot(labels)
+        # plt.show()
+
+        return labels
 
     def read_labels(self, label_file):
         with open(label_file,'r') as f:

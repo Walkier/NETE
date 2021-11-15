@@ -29,8 +29,10 @@ torch.backends.cudnn.deterministic = True
 parser = argparse.ArgumentParser()
 parser.add_argument('--action', default='base_train')
 parser.add_argument('--dataset', default="cholec80")
+parser.add_argument('--debug_interval', default=1, type=int)
 parser.add_argument('--sample_rate', default=2, type=int)
 parser.add_argument('--k', default=-100, type=int) # for cross validate type
+parser.add_argument('--base_model', default='class_only')
 parser.add_argument('--refine_model', default='gru')
 parser.add_argument('--refine_epochs', default=40, type=int)
 args = parser.parse_args()
@@ -45,6 +47,7 @@ if args.dataset == 'm2cai16':
     
 loss_layer = nn.CrossEntropyLoss()
 mse_layer = nn.MSELoss(reduction='none')
+prog_loss_layer = nn.L1Loss()#nn.SmoothL1Loss(beta=0.001)
 
 num_stages = 3  # refinement stages
 if args.dataset == 'm2cai16':
@@ -208,7 +211,7 @@ def refine_predict(p_model, r_model, test_loader):
                 f_ptr.write('{}\t{}\n'.format(index, line))
             f_ptr.close()
  
-def base_train(model, train_loader, validation_loader, save_dir = 'models/base_tcn', debug = False):
+def base_train(model, train_loader, validation_loader, model_type, save_dir = 'models/base_tcn', debug = False, debug_interval = 1):
     global learning_rate, epochs
     model.to(device)
     if not os.path.exists(save_dir):
@@ -220,29 +223,46 @@ def base_train(model, train_loader, validation_loader, save_dir = 'models/base_t
         correct = 0
         total = 0
         loss_item = 0
+        loss_item_prog_comp = 0
         optimizer = torch.optim.Adam(model.parameters(), learning_rate, weight_decay=1e-5)
-        for (video, labels, mask, video_name) in (train_loader):
+        for (video, labels, mask, video_name, phase_progress) in (train_loader):
             labels = torch.Tensor(labels).long()
+            phase_progress = torch.Tensor(phase_progress).float()
             mask = torch.Tensor(mask).float()
+
             video, labels = video.to(device), labels.to(device)
+            phase_progress = phase_progress.to(device)
             mask = mask.to(device)
             outputs = model(video)
             
             loss = 0
-            loss += loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes), labels.view(-1)) # cross_entropy loss
-            loss += torch.mean(torch.clamp(mse_layer(F.log_softmax(outputs[:, :, 1:], dim=1), F.log_softmax(outputs.detach()[:, :, :-1], dim=1)), min=0, max=16)) # smooth loss
+
+            if model_type == 'with_progress':
+                loss += loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, :num_classes], labels.view(-1)) # cross_entropy loss
+
+                #TODO: shud I zero-center the target or add another activation bf this, the target range is so diff from the rest?
+                c = 0.01
+                prog_l1_loss = c*prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
+                loss += prog_l1_loss
+
+                loss_item_prog_comp += prog_l1_loss.item()
+            else:
+                loss += loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes), labels.view(-1)) # cross_entropy loss
+            
+            loss += torch.mean(torch.clamp(mse_layer(F.log_softmax(outputs[:, :num_classes, 1:], dim=1), F.log_softmax(outputs[:, :num_classes, 1:], dim=1)), min=0, max=16)) # smooth loss
 
             loss_item += loss.item()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            _, predicted = torch.max(outputs.data, 1)
+            _, predicted = torch.max(outputs.data[:, :num_classes, :], 1)
             correct += ((predicted == labels).sum()).item()
             total += labels.shape[0]
 
-        print('Train Epoch {}: Acc {}, Loss {}'.format(epoch, correct / total, loss_item / total))
-        if debug:
+        print('Train Epoch {}: Acc {}\nTotal Loss {}, Label Loss {}, Prog Loss {}'\
+            .format(epoch, correct / total, loss_item / total, (loss_item - loss_item_prog_comp) / total, loss_item_prog_comp / total) )
+        if debug and epoch % debug_interval == 0:
             base_test(model, validation_loader)
         torch.save(model.state_dict(), save_dir + '/{}.model'.format(epoch))
 
@@ -253,8 +273,9 @@ def base_test(model, test_loader, save_prediction=False, random_mask=False):
     with torch.no_grad():
         correct = 0
         total = 0
-        for (video, labels, mask, video_name) in (test_loader):
+        for (video, labels, mask, video_name, phase_progress) in (test_loader):
             labels = torch.Tensor(labels).long()
+            phase_progress = torch.Tensor(phase_progress).float()
             if random_mask:
                 # random_mask
                 mask = np.random.choice(2, len(mask), replace=True, p=[0.3,0.7])
@@ -262,9 +283,10 @@ def base_test(model, test_loader, save_prediction=False, random_mask=False):
             else:
                 mask = torch.Tensor(mask).float().to(device)
             video, labels = video.to(device), labels.to(device)
+            phase_progress = phase_progress.to(device)
             mask = mask.to(device)
             outputs = model(video, mask)
-            _, predicted = torch.max(outputs.data, 1)
+            _, predicted = torch.max(outputs.data[:, :num_classes, :], 1)
             correct += ((predicted == labels).sum()).item()
             total += labels.shape[0]
             
@@ -280,8 +302,12 @@ def base_test(model, test_loader, save_prediction=False, random_mask=False):
                 video_name = video_name[0] # videoxx.npy
                 feature_save_path = os.path.join(feature_save_dir, video_name)
                 np.save(feature_save_path, outputs_f)
+
+            prog_l1_loss = 0
+            if outputs.data.shape[1] > num_classes: #model outputs prog
+                prog_l1_loss = prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
     
-        print('Test: Acc {}'.format(correct / total))
+        print('-\nTest: Acc {}, Prog Loss {}'.format(correct / total, prog_l1_loss / total))
 
 def base_predict(model, test_loader, argdataset, sample_rate, pki = False):
     model.eval()
@@ -510,9 +536,13 @@ def grid_search(model, test_loader):
                     c_gamma = gamma
                     
     print('Best alpha :{} beta: {} gamma:{} best :{}'.format(c_alpha, c_beta, c_gamma, c_best)) 
-    
-    
-base_model = model.BaseCausalTCN(num_layers, num_f_maps, dim, num_classes)
+
+print('loading base model', args.base_model)
+if args.base_model == 'with_progress':
+    base_model = model.BaseCausalTCN(num_layers, num_f_maps, dim, num_classes+1)
+else:
+    base_model = model.BaseCausalTCN(num_layers, num_f_maps, dim, num_classes)
+    print('og base model loaded')
 
 if args.refine_model == 'gru':
     refine_model = model.MultiStageRefineGRU(num_stage=num_stages, num_f_maps=128, num_classes=num_classes)
@@ -529,7 +559,9 @@ if args.action == 'base_train':
     video_test_dataloader = DataLoader(video_testdataset, batch_size=1, shuffle=False, drop_last=False)
     
     model_save_dir = 'models/{}/base_tcn'.format(args.dataset)
-    base_train(base_model, video_train_dataloader, video_test_dataloader, save_dir=model_save_dir, debug=True)
+    model_save_dir += '_'+args.base_model
+    print('model will be saved at', model_save_dir)
+    base_train(base_model, video_train_dataloader, video_test_dataloader, args.base_model, save_dir=model_save_dir, debug=True, debug_interval=args.debug_interval)
 
 
 if args.action == 'base_predict':
