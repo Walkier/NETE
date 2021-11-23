@@ -4,3 +4,4 @@ m2cai16/
 models/
 results/
 saved_models/
+slurm/slurm*

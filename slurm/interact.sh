@@ -1,0 +1,1 @@
+srun --nodes=1 --partition=gpu-share --ntasks-per-node=1 --time=01:00:00 --gres=gpu:1 --pty bash -i
