@@ -36,6 +36,7 @@ parser.add_argument('--k', default=-100, type=int) # for cross validate type
 parser.add_argument('--base_model', default='class_only') #can select with_progress
 parser.add_argument('--refine_model', default='gru')
 parser.add_argument('--refine_epochs', default=40, type=int)
+parser.add_argument('--plot_progress', default=False, type=bool)
 args = parser.parse_args()
 
 learning_rate = 1e-4
@@ -264,7 +265,7 @@ def base_train(model, train_loader, validation_loader, model_type, save_dir = 'm
         print('Train Epoch {}: Acc {}\nTotal Loss {}, Label Loss {}, Prog Loss {}'\
             .format(epoch, correct / total, loss_item / total, (loss_item - loss_item_prog_comp) / total, loss_item_prog_comp / total) )
         if debug and epoch % debug_interval == 0:
-            visualize_progress(video_name[0], phase_progress.view(-1).cpu().detach().numpy(), outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1].cpu().detach().numpy(), save_dir, epoch)
+            visualize_progress(video_name[0], phase_progress.view(-1), outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], save_dir, epoch)
             base_test(model, validation_loader, epoch=epoch, save_dir=save_dir)
         torch.save(model.state_dict(), save_dir + '/{}.model'.format(epoch))
 
@@ -275,6 +276,7 @@ def base_test(model, test_loader, save_prediction=False, random_mask=False, epoc
     with torch.no_grad():
         correct = 0
         total = 0
+        i = 0
         for (video, labels, mask, video_name, phase_progress) in (test_loader):
             labels = torch.Tensor(labels).long()
             phase_progress = torch.Tensor(phase_progress).float()
@@ -309,15 +311,22 @@ def base_test(model, test_loader, save_prediction=False, random_mask=False, epoc
             if outputs.data.shape[1] > num_classes: #model outputs prog
                 prog_l1_loss = prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
 
-                visualize_progress(video_name[0], phase_progress.view(-1).cpu(), outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1].cpu(), save_dir, epoch)
+                if i%10 == 0:
+                    visualize_progress(video_name[0], phase_progress.view(-1), outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], save_dir, epoch)
     
         print('-\nTest: Acc {}, Prog Loss {}'.format(correct / total, prog_l1_loss / total))
+        i += 1
 
+# expects a gpu tensor for ground and pred
 def visualize_progress(video_name, ground, pred, save_dir, epoch):
-    plt.title(video_name)
-    plt.plot(pred)
-    plt.plot(ground)
-    plt.savefig(save_dir + '/{}_{}.png'.format(epoch, video_name))
+    if args.plot_progress:
+        plt.figure()
+        plt.title(video_name)
+        plt.plot(pred.cpu().detach().numpy())
+        plt.plot(ground.cpu().detach().numpy())
+        print('hi, ', pred.cpu().detach().numpy())
+        plt.savefig(save_dir + '/{}_{}.png'.format(epoch, video_name))
+        plt.close()
 
 def base_predict(model, test_loader, argdataset, sample_rate, pki = False):
     model.eval()
