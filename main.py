@@ -265,7 +265,7 @@ def base_train(model, train_loader, validation_loader, model_type, save_dir = 'm
         print('Train Epoch {}: Acc {}\nTotal Loss {}, Label Loss {}, Prog Loss {}'\
             .format(epoch, correct / total, loss_item / total, (loss_item - loss_item_prog_comp) / total, loss_item_prog_comp / total) )
         if debug and epoch % debug_interval == 0:
-            visualize_progress(video_name[0], phase_progress.view(-1), outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], save_dir, epoch)
+            visualize_progress(video_name[0], phase_progress.view(-1), outputs, save_dir, epoch)
             base_test(model, validation_loader, epoch=epoch, save_dir=save_dir)
         torch.save(model.state_dict(), save_dir + '/{}.model'.format(epoch))
 
@@ -312,7 +312,7 @@ def base_test(model, test_loader, save_prediction=False, random_mask=False, epoc
                 prog_l1_loss = prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
 
                 if i%10 == 0:
-                    visualize_progress(video_name[0], phase_progress.view(-1), outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], save_dir, epoch)
+                    visualize_progress(video_name[0], phase_progress.view(-1), outputs, save_dir, epoch)
     
         print('-\nTest: Acc {}, Prog Loss {}'.format(correct / total, prog_l1_loss / total))
         i += 1
@@ -322,7 +322,7 @@ def visualize_progress(video_name, ground, pred, save_dir, epoch):
     if args.plot_progress:
         plt.figure()
         plt.title(video_name)
-        plt.plot(pred.cpu().detach().numpy())
+        plt.plot(pred.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1].cpu().detach().numpy())
         plt.plot(ground.cpu().detach().numpy())
         print('hi, ', pred.cpu().detach().numpy())
         plt.savefig(save_dir + '/{}_{}.png'.format(epoch, video_name))
