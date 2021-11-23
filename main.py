@@ -32,7 +32,7 @@ parser.add_argument('--dataset', default="cholec80")
 parser.add_argument('--debug_interval', default=1, type=int)
 parser.add_argument('--sample_rate', default=2, type=int)
 parser.add_argument('--k', default=-100, type=int) # for cross validate type
-parser.add_argument('--base_model', default='class_only')
+parser.add_argument('--base_model', default='class_only') #can select with_progress
 parser.add_argument('--refine_model', default='gru')
 parser.add_argument('--refine_epochs', default=40, type=int)
 args = parser.parse_args()
@@ -242,14 +242,14 @@ def base_train(model, train_loader, validation_loader, model_type, save_dir = 'm
 
                 #TODO: shud I zero-center the target or add another activation bf this, the target range is so diff from the rest?
                 c = 0.01
-                prog_l1_loss = c*prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
+                prog_l1_loss = torch.clamp(c*prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1)), min=0, max=loss.item())
                 loss += prog_l1_loss
 
                 loss_item_prog_comp += prog_l1_loss.item()
             else:
                 loss += loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes), labels.view(-1)) # cross_entropy loss
             
-            loss += torch.mean(torch.clamp(mse_layer(F.log_softmax(outputs[:, :num_classes, 1:], dim=1), F.log_softmax(outputs[:, :num_classes, 1:], dim=1)), min=0, max=16)) # smooth loss
+            loss += torch.mean(torch.clamp(mse_layer(F.log_softmax(outputs[:, :num_classes, 1:], dim=1), F.log_softmax(outputs.detach()[:, :num_classes, :-1], dim=1)), min=0, max=16)) # smooth loss
 
             loss_item += loss.item()
             optimizer.zero_grad()
