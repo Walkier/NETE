@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
 import os
+import sys
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -38,9 +39,15 @@ parser.add_argument('--refine_model', default='gru')
 parser.add_argument('--refine_epochs', default=40, type=int)
 parser.add_argument('--plot_progress', default=False, type=bool)
 parser.add_argument('--print', default='start')
+parser.add_argument('--c', default=1.0, type=float)
 args = parser.parse_args()
 
-print(args.print)
+print('job name: ', args.print)
+run_id = f'{args.print}-{hex(random.randint(0, 255))}'
+sys.stdout = open(f'./slurm/{run_id}.txt', 'w')
+print('job started, log at ', str(sys.stdout))
+
+print('job name: ', args.print)
 print(args)
 
 learning_rate = 1e-4
@@ -247,7 +254,7 @@ def base_train(model, train_loader, validation_loader, model_type, save_dir = 'm
                 loss += loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, :num_classes], labels.view(-1)) # cross_entropy loss
 
                 #TODO: shud I zero-center the target or add another activation bf this, the target range is so diff from the rest?
-                c = 1
+                c = args.c
                 prog_l1_loss = c*prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
                 loss += prog_l1_loss
 
@@ -583,7 +590,8 @@ if args.action == 'base_train':
     video_test_dataloader = DataLoader(video_testdataset, batch_size=1, shuffle=False, drop_last=False)
     
     model_save_dir = 'models/{}/base_tcn'.format(args.dataset)
-    model_save_dir += '_'+args.base_model
+    model_save_dir += '_'+args.base_model+'/'+run_id
+
     print('model will be saved at', model_save_dir)
     base_train(base_model, video_train_dataloader, video_test_dataloader, args.base_model, save_dir=model_save_dir, debug=True, debug_interval=args.debug_interval)
 
