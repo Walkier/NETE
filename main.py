@@ -37,7 +37,11 @@ parser.add_argument('--base_model', default='class_only') #can select with_progr
 parser.add_argument('--refine_model', default='gru')
 parser.add_argument('--refine_epochs', default=40, type=int)
 parser.add_argument('--plot_progress', default=False, type=bool)
+parser.add_argument('--print', default='start')
 args = parser.parse_args()
+
+print(args.print)
+print(args)
 
 learning_rate = 1e-4
 epochs = 100
@@ -244,7 +248,7 @@ def base_train(model, train_loader, validation_loader, model_type, save_dir = 'm
 
                 #TODO: shud I zero-center the target or add another activation bf this, the target range is so diff from the rest?
                 c = 1
-                prog_l1_loss = torch.clamp(c*prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1)), min=0, max=loss.item())
+                prog_l1_loss = c*prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
                 loss += prog_l1_loss
 
                 loss_item_prog_comp += prog_l1_loss.item()
@@ -262,10 +266,12 @@ def base_train(model, train_loader, validation_loader, model_type, save_dir = 'm
             correct += ((predicted == labels).sum()).item()
             total += labels.shape[0]
 
+            if debug and epoch % debug_interval == 0 and '0' in video_name[0]:
+                visualize_progress(video_name[0], phase_progress.view(-1), outputs, save_dir, epoch)
+
         print('Train Epoch {}: Acc {}\nTotal Loss {}, Label Loss {}, Prog Loss {}'\
             .format(epoch, correct / total, loss_item / total, (loss_item - loss_item_prog_comp) / total, loss_item_prog_comp / total) )
         if debug and epoch % debug_interval == 0:
-            visualize_progress(video_name[0], phase_progress.view(-1), outputs, save_dir, epoch)
             base_test(model, validation_loader, epoch=epoch, save_dir=save_dir)
         torch.save(model.state_dict(), save_dir + '/{}.model'.format(epoch))
 
@@ -324,8 +330,7 @@ def visualize_progress(video_name, ground, pred, save_dir, epoch):
         plt.title(video_name)
         plt.plot(pred.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1].cpu().detach().numpy())
         plt.plot(ground.cpu().detach().numpy())
-        print('hi, ', pred.cpu().detach().numpy())
-        plt.savefig(save_dir + '/{}_{}.png'.format(epoch, video_name))
+        plt.savefig(os.getcwd() + '/' + save_dir + '/{}_{}.png'.format(epoch, video_name))
         plt.close()
 
 def base_predict(model, test_loader, argdataset, sample_rate, pki = False):

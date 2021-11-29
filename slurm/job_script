@@ -32,6 +32,6 @@ conda activate py38
 
 # Execute applications in parallel 
 # srun -n 2 --gres=gpu:1 myapp1 &    # Assign 2 CPU cores and 1 GPU device to run application "myapp1" 
-# srun -n 1 --gres=gpu:1 python main.py --action=base_train --debug_interval=10 --base_model=with_progress # Similarly, assign 1 CPU core and 1 GPU device to run application
-srun -n 1 --gres=gpu:1 python3 main.py --action=base_train --debug_interval=10 --base_model=with_progress # Similarly, assign 1 CPU core and 1 GPU device to run application
+srun -n 1 --gres=gpu:1 python3 main.py --action=base_train --debug_interval=10 --base_model=with_progress --plot_progress==True --print=yo # Similarly, assign 1 CPU core and 1 GPU device to run application
+# srun -n 1 --gres=gpu:1 python3 hello.py
 wait
