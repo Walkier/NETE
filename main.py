@@ -23,7 +23,6 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
 np.random.seed(seed)  # Numpy module.
-random.seed(seed)  # Python random module.
 torch.manual_seed(seed)
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
@@ -46,6 +45,7 @@ print('job name: ', args.print)
 run_id = f'{args.print}-{hex(random.randint(0, 255))}'
 sys.stdout = open(f'./slurm/{run_id}.txt', 'w')
 print('job started, log at ', str(sys.stdout))
+random.seed(seed)  # Python random module.
 
 print('job name: ', args.print)
 print(args)
@@ -60,7 +60,7 @@ if args.dataset == 'm2cai16':
     
 loss_layer = nn.CrossEntropyLoss()
 mse_layer = nn.MSELoss(reduction='none')
-prog_loss_layer = nn.SmoothL1Loss(beta=0.0001)
+prog_loss_layer = nn.MSELoss()#nn.SmoothL1Loss(beta=0.0001)
 
 num_stages = 3  # refinement stages
 if args.dataset == 'm2cai16':
@@ -254,11 +254,13 @@ def base_train(model, train_loader, validation_loader, model_type, save_dir = 'm
                 loss += loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, :num_classes], labels.view(-1)) # cross_entropy loss
 
                 #TODO: shud I zero-center the target or add another activation bf this, the target range is so diff from the rest?
-                c = args.c
-                prog_l1_loss = c*prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
-                loss += prog_l1_loss
+                def defined_prog_loss(pred, grd):
+                    return args.c*prog_loss_layer(pred, grd)
 
-                loss_item_prog_comp += prog_l1_loss.item()
+                prog_loss = defined_prog_loss(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
+                loss += prog_loss
+
+                loss_item_prog_comp += prog_loss.item()
             else:
                 loss += loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes), labels.view(-1)) # cross_entropy loss
             
@@ -279,10 +281,10 @@ def base_train(model, train_loader, validation_loader, model_type, save_dir = 'm
         print('Train Epoch {}: Acc {}\nTotal Loss {}, Label Loss {}, Prog Loss {}'\
             .format(epoch, correct / total, loss_item / total, (loss_item - loss_item_prog_comp) / total, loss_item_prog_comp / total) )
         if debug and epoch % debug_interval == 0:
-            base_test(model, validation_loader, epoch=epoch, save_dir=save_dir)
+            base_test(model, validation_loader, epoch=epoch, save_dir=save_dir, defined_prog_loss=defined_prog_loss)
         torch.save(model.state_dict(), save_dir + '/{}.model'.format(epoch))
 
-def base_test(model, test_loader, save_prediction=False, random_mask=False, epoch=-1, save_dir='trash'):
+def base_test(model, test_loader, save_prediction=False, random_mask=False, epoch=-1, save_dir='trash', defined_prog_loss=None):
     model.to(device)
     model.eval()
     
@@ -322,12 +324,14 @@ def base_test(model, test_loader, save_prediction=False, random_mask=False, epoc
 
             prog_l1_loss = 0
             if outputs.data.shape[1] > num_classes: #model outputs prog
-                prog_l1_loss = prog_loss_layer(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
+                temp = nn.L1Loss()
+                prog_l1_loss = temp(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
+                prog_loss = defined_prog_loss(outputs.transpose(2, 1).contiguous().view(-1, num_classes+1)[:, -1], phase_progress.view(-1))
 
                 if i%10 == 0:
                     visualize_progress(video_name[0], phase_progress.view(-1), outputs, save_dir, epoch)
     
-        print('-\nTest: Acc {}, Prog Loss {}'.format(correct / total, prog_l1_loss / total))
+        print('-\nTest: Acc {}, Prog Loss {}, Prog L1 Loss {}'.format(correct/total, prog_loss/total, prog_l1_loss/total))
         i += 1
 
 # expects a gpu tensor for ground and pred
